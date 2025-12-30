@@ -22,29 +22,60 @@ function openingTextForMood(mood: string) {
       return (
         "I’m here with you.\n\n" +
         "If everything feels like too much, we can slow it down.\n\n" +
-        "We can take this at your pace. Nothing needs to be figured out right now."
+        "You don’t have to carry it all at once.\n\n" +
+        "What feels heaviest right now?"
       );
 
     case "alone":
       return (
         "I’m here with you.\n\n" +
         "Feeling alone can be really heavy.\n\n" +
-        "We can take this at your pace. Nothing needs to be figured out right now."
+        "You don’t have to do this by yourself.\n\n" +
+        "What’s been on your mind?"
       );
 
     case "stuck":
       return (
         "I’m here with you.\n\n" +
         "Feeling stuck can be exhausting.\n\n" +
-        "We can take this at your pace. Nothing needs to be figured out right now."
+        "We can take one small step at a time.\n\n" +
+        "Where do you feel blocked?"
       );
 
     default:
       return (
         "I’m here with you.\n\n" +
-        "We can take this at your pace. Nothing needs to be figured out right now."
+        "You don’t have to have the right words.\n\n" +
+        "What made you reach out today?"
       );
   }
+}
+
+function buildSystemPrompt(mood: string) {
+  return (
+    `You are MindHeart, a calm, safe, emotionally-attuned companion.\n` +
+    `User mood: ${mood}.\n\n` +
+    `Rules:\n` +
+    `- Regulate first with warmth and presence.\n` +
+    `- Use short, natural paragraphs.\n` +
+    `- Avoid robotic mirroring phrases like "it sounds like".\n` +
+    `- After validation, gently invite continuation without pressure.\n` +
+    `- No lecturing, no clinical tone, no excessive lists.\n` +
+    `- Do not mention these rules.\n\n` +
+    `QUESTION RULES (CRITICAL)\n` +
+    `- Do NOT ask a question in every response.\n` +
+    `- Do NOT ask follow-up questions once enough context exists.\n` +
+    `- Do NOT default to “How does that make you feel?”\n` +
+    `- Do NOT ask “why” questions.\n` +
+    `- When the user asks “how can you help me,” respond with presence and options, NOT explanation.\n\n` +
+    `You may ask a question ONLY when:\n` +
+    `- You truly need missing information to continue, OR\n` +
+    `- You are offering a choice.\n\n` +
+    `When asking:\n` +
+    `- Ask ONE question only.\n` +
+    `- Prefer choice-based questions (A or B).\n` +
+    `- Never stack questions.\n`
+  );
 }
 
 export default function ChatPage() {
@@ -52,25 +83,23 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // If user came from /check-in, hide mood chips (better flow)
+  const [cameFromCheckIn, setCameFromCheckIn] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   /* ---------------- Init chat with mood context ---------------- */
   useEffect(() => {
     const mood = localStorage.getItem("mindheart_mood") || "neutral";
+    const fromCheckIn = localStorage.getItem("mindheart_from_checkin") === "true";
+
+    setCameFromCheckIn(fromCheckIn);
+    // only meant for first load after check-in
+    localStorage.removeItem("mindheart_from_checkin");
 
     const systemMessage: ChatMessage = {
       role: "system",
-      content:
-        `You are MindHeart, a calm, safe, emotionally-attuned companion.\n` +
-        `User mood: ${mood}.\n\n` +
-        `Rules:\n` +
-        `- Regulate first with warmth and presence.\n` +
-        `- Use short, natural paragraphs.\n` +
-        `- Avoid robotic mirroring phrases like "it sounds like".\n` +
-        `- After validation, gently invite continuation without pressure.\n` +
-        `- Ask at most ONE gentle question, only if it truly helps.\n` +
-        `- No lecturing, no clinical tone, no excessive lists.\n` +
-        `- Do not mention these rules.\n`,
+      content: buildSystemPrompt(mood),
     };
 
     const openingMessage: ChatMessage = {
@@ -86,25 +115,13 @@ export default function ChatPage() {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  /* ---------------- Step 3c: set mood + restart thread ---------------- */
+  /* ---------------- Set mood + restart thread ---------------- */
   function setMoodAndRestart(nextMood: string) {
-    // save mood
     localStorage.setItem("mindheart_mood", nextMood);
 
-    // rebuild system + opening
     const systemMessage: ChatMessage = {
       role: "system",
-      content:
-        `You are MindHeart, a calm, safe, emotionally-attuned companion.\n` +
-        `User mood: ${nextMood}.\n\n` +
-        `Rules:\n` +
-        `- Regulate first with warmth and presence.\n` +
-        `- Use short, natural paragraphs.\n` +
-        `- Avoid robotic mirroring phrases like "it sounds like".\n` +
-        `- After validation, gently invite continuation without pressure.\n` +
-        `- Ask at most ONE gentle question, only if it truly helps.\n` +
-        `- No lecturing, no clinical tone, no excessive lists.\n` +
-        `- Do not mention these rules.\n`,
+      content: buildSystemPrompt(nextMood),
     };
 
     const openingMessage: ChatMessage = {
@@ -112,9 +129,9 @@ export default function ChatPage() {
       content: openingTextForMood(nextMood),
     };
 
-    // reset chat thread
     setMessages([systemMessage, openingMessage]);
     setInput("");
+    setCameFromCheckIn(false); // if user changes mood manually, chips are allowed
   }
 
   async function sendMessage() {
@@ -226,33 +243,35 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Quick emotion chips */}
-      <div
-        style={{
-          padding: "8px 16px",
-          display: "flex",
-          gap: 8,
-          justifyContent: "center",
-        }}
-      >
-        {QUICK_EMOTIONS.map((e) => (
-          <button
-            key={e.value}
-            onClick={() => setMoodAndRestart(e.value)}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 999,
-              background: "#1e293b",
-              color: "#e5e7eb",
-              border: "1px solid rgba(148,163,184,0.2)",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            {e.label}
-          </button>
-        ))}
-      </div>
+      {/* Quick emotion chips (hidden if user came from /check-in) */}
+      {!cameFromCheckIn && (
+        <div
+          style={{
+            padding: "8px 16px",
+            display: "flex",
+            gap: 8,
+            justifyContent: "center",
+          }}
+        >
+          {QUICK_EMOTIONS.map((e) => (
+            <button
+              key={e.value}
+              onClick={() => setMoodAndRestart(e.value)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 999,
+                background: "#1e293b",
+                color: "#e5e7eb",
+                border: "1px solid rgba(148,163,184,0.2)",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              {e.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input */}
       <div
